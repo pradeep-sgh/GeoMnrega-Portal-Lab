@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { HelpCircle, Download, FileText, Map as MapIcon, Image as ImageIcon, Info, Database } from 'lucide-react';
+import { Info, Compass, Download, Map as MapIcon, HelpCircle, BookOpen } from 'lucide-react';
 
-export default function Sidebar({ dataset, setDataset, year, setYear }) {
+export default function Sidebar({ dataset, setDataset, year, setYear, onStartTour, tourHighlight, onExportMap, onOpenFAQ, onOpenAbout }) {
   const [activeCategory, setActiveCategory] = useState('mnrega');
 
   const categories = [
@@ -82,22 +82,27 @@ export default function Sidebar({ dataset, setDataset, year, setYear }) {
         { id: 'lulc-2009', name: 'LULC 2009-10 Analysis' },
         { id: 'lulc-2015', name: 'LULC 2015-16 Analysis' }
       ]
+    },
+    {
+      id: 'shrug-devlab',
+      name: 'SHRUG Dev Lab Data',
+      variables: [
+        { id: 'shrug-open', name: 'Open SHRUG Explorer →' }
+      ]
     }
   ];
 
   return (
-    <div className="w-[380px] h-screen flex flex-col bg-[#1a2b3c] text-white shadow-xl z-20 flex-shrink-0">
-      {/* Top Navigation Wrapper (mimics SHRUG top nav) */}
+    <div className={`w-[380px] h-screen flex flex-col bg-[#1a2b3c] text-white shadow-xl flex-shrink-0 transition-all duration-300 ${
+      tourHighlight === 'sidebar' || tourHighlight === 'year'
+        ? 'z-[150] ring-4 ring-teal-400 ring-inset'
+        : 'z-20'
+    }`}>
+      {/* Top Navigation Wrapper */}
       <div className="bg-[#f8f9fa] text-[#1a2b3c] flex flex-col border-b border-gray-300">
         <div className="p-4 flex items-center gap-2 border-b border-gray-200">
           <MapIcon className="w-6 h-6 text-[#007bff]" />
           <h1 className="text-xl font-bold tracking-tight">GeoMNREGA Research Portal</h1>
-        </div>
-        <div className="flex px-4 py-2 gap-4 text-sm font-medium">
-          <a href="#" className="hover:text-[#007bff] transition-colors">About</a>
-          <a href="#" className="hover:text-[#007bff] transition-colors">FAQ</a>
-          <a href="#" className="hover:text-[#007bff] transition-colors">Download</a>
-          <a href="#" className="hover:text-[#007bff] transition-colors">Docs</a>
         </div>
       </div>
 
@@ -136,22 +141,52 @@ export default function Sidebar({ dataset, setDataset, year, setYear }) {
           </div>
         ))}
 
-        {/* Year Selector removed as per requirements */}
+        {/* Year Selector — only relevant for NREGA (MICES has no year-specific data) */}
+        {(dataset?.startsWith('nrega_') || activeCategory === 'nrega-reports') && (
+        <div className={`border-b border-gray-700 p-4 transition-all duration-300 ${tourHighlight === 'year' ? 'ring-2 ring-teal-400 ring-inset bg-gray-800/50 rounded' : ''}`}>
+          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            Financial Year
+          </label>
+          <select
+            value={year}
+            onChange={(e) => setYear(e.target.value)}
+            className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-sm text-gray-200 focus:outline-none focus:border-[#007bff]"
+          >
+            {['2014','2015','2016','2017','2018','2019','2020','2021','2022','2023'].map(y => (
+              <option key={y} value={y}>{y}–{String(parseInt(y)+1).slice(2)}</option>
+            ))}
+          </select>
+        </div>
+        )}
       </div>
 
       {/* Footer Utility Bar */}
-      <div className="bg-[#aee6e6] text-[#1a2b3c] py-3 px-2 flex justify-evenly items-center text-xs font-semibold">
-        <button className="flex flex-col items-center gap-1 hover:text-[#007bff] transition-colors flex-1 text-center">
-          <Database className="w-5 h-5" />
-          <span>Data Sources</span>
+      <div className="bg-[#aee6e6] text-[#1a2b3c] py-3 px-2 flex justify-evenly items-center text-xs font-semibold mt-auto">
+        <button onClick={() => onOpenAbout && onOpenAbout()} className="flex flex-col items-center gap-1 hover:text-[#007bff] transition-colors flex-1 text-center">
+          <Info className="w-5 h-5" />
+          <span>About</span>
+        </button>
+        <button
+          onClick={() => onOpenFAQ && onOpenFAQ()}
+          className="flex flex-col items-center gap-1 hover:text-[#007bff] transition-colors flex-1 text-center"
+        >
+          <HelpCircle className="w-5 h-5" />
+          <span>FAQ</span>
+        </button>
+        <button
+          onClick={onStartTour}
+          className="flex flex-col items-center gap-1 hover:text-[#007bff] transition-colors flex-1 text-center"
+        >
+          <Compass className="w-5 h-5" />
+          <span>Tour</span>
         </button>
         <button className="flex flex-col items-center gap-1 hover:text-[#007bff] transition-colors flex-1 text-center">
-          <FileText className="w-5 h-5" />
-          <span>Methodology</span>
+          <BookOpen className="w-5 h-5" />
+          <span>Docs</span>
         </button>
-        <button className="flex flex-col items-center gap-1 hover:text-[#007bff] transition-colors flex-1 text-center">
+        <button onClick={onExportMap} className="flex flex-col items-center gap-1 hover:text-[#007bff] transition-colors flex-1 text-center">
           <Download className="w-5 h-5" />
-          <span>Export Data</span>
+          <span>Export Map</span>
         </button>
       </div>
     </div>

@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import indiaMicesData from '../data/mices/india_mices.json'
-import indiaMicesDistrictData from '../data/mices/india_mices_districts.json'
-import { getMnregaDataByYear } from '../data/mockData'
+import { loadDistrictData, getDistrictDataSync } from '../data/districtDataLoader'
+
+
 
 // Set your Mapbox access token here
 // Get free token at: https://account.mapbox.com/auth/signin/
@@ -17,6 +18,12 @@ export default function MapView({ dataset, year, onStateSelect, selectedState })
   const currentStyleRef = useRef(mapStyle)
   const [styleLoadedTrigger, setStyleLoadedTrigger] = useState(0)
   const selectedStateIdRef = useRef(null)
+  const [indiaMicesDistrictData, setIndiaMicesDistrictData] = useState(() => getDistrictDataSync())
+
+  // Load the large district GeoJSON lazily (avoids bundling 100MB+ file)
+  useEffect(() => {
+    loadDistrictData().then(data => setIndiaMicesDistrictData(prev => prev || data))
+  }, [])
 
   useEffect(() => {
     if (map.current) return // Initialize map only once
@@ -28,6 +35,15 @@ export default function MapView({ dataset, year, onStateSelect, selectedState })
       zoom: 4.5,
       pitch: 0,
       bearing: 0,
+      preserveDrawingBuffer: true,
+    })
+
+    map.current.on('error', (e) => {
+      console.warn('Mapbox error event:', e)
+    })
+
+    map.current.on('render', () => {
+      // render event handler
     })
 
     // Event listeners are bound here once
@@ -122,7 +138,7 @@ export default function MapView({ dataset, year, onStateSelect, selectedState })
 
   // Update data when dataset or year changes
   useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded()) return
+    if (!map.current || !map.current.isStyleLoaded() || !indiaMicesDistrictData) return
 
     // Ensure all vector sources reliably exist
     if (!map.current.getSource('states')) {
@@ -173,11 +189,12 @@ export default function MapView({ dataset, year, onStateSelect, selectedState })
     const isNicesDataset = dataset === 'nices-cropland' || dataset === 'nices-forest'
     const isVectorDataset = dataset?.startsWith('mices_') || dataset?.startsWith('nrega_')
 
-    // Handle NICES Raster Tiles
-    if (isNicesDataset) {
-      if (map.current.getLayer('lulc-layer')) map.current.removeLayer('lulc-layer')
-      if (map.current.getSource('lulc-tif')) map.current.removeSource('lulc-tif')
+    if (map.current.getLayer('lulc-layer')) map.current.removeLayer('lulc-layer')
+    if (map.current.getLayer('lulc-image-layer')) map.current.removeLayer('lulc-image-layer')
+    if (map.current.getSource('lulc-tif')) map.current.removeSource('lulc-tif')
+    if (map.current.getSource('lulc-image')) map.current.removeSource('lulc-image')
 
+    if (isNicesDataset) {
       map.current.addSource('lulc-tif', {
         type: 'raster',
         tiles: [`http://localhost:8000/tiles/{z}/{x}/{y}.png?dataset=${dataset}`],
@@ -190,9 +207,6 @@ export default function MapView({ dataset, year, onStateSelect, selectedState })
         paint: { 'raster-opacity': 0.8 }
       })
       map.current.flyTo({ center: [78, 21], zoom: 4.5 })
-    } else {
-      if (map.current.getLayer('lulc-layer')) map.current.removeLayer('lulc-layer')
-      if (map.current.getSource('lulc-tif')) map.current.removeSource('lulc-tif')
     }
 
     // Handle Vector Choropleth (MICES & NREGA)
@@ -201,75 +215,144 @@ export default function MapView({ dataset, year, onStateSelect, selectedState })
       if (dataset?.startsWith('mices_')) colors = ['#f2f0f7', '#cbc9e2', '#9e9ac8', '#756bb1', '#54278f']; // Purples
       else if (dataset?.startsWith('nrega_demand')) colors = ['#fff5eb', '#fdd0a2', '#fd8d3c', '#d94801', '#8c2d04']; // Oranges
       else if (dataset?.startsWith('nrega_')) colors = ['#f7fcf5', '#c7e9c0', '#74c476', '#238b45', '#00441b']; // Greens
-      
-      // Find max state value
+
+      const yearKey = `${dataset}_${year}`;
+
+      const getNumeric = (value) => {
+        if (typeof value === 'number' && !Number.isNaN(value)) return value;
+        if (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value))) return Number(value);
+        return null;
+      };
+
+      // Build state aggregates for nrega_demand using year-specific district values
+      const nregaStateAggregates = {};
+      if (dataset === 'nrega_demand') {
+        indiaMicesDistrictData.features.forEach((district) => {
+          const stateName = district.properties.NAME_1;
+          const districtValue = getNumeric(district.properties[`nrega_demand_${year}`])
+            ?? getNumeric(district.properties['nrega_demand'])
+            ?? getNumeric(district.properties[`nrega_persondays_total_${year}`])
+            ?? getNumeric(district.properties['nrega_persondays_total'])
+            ?? 0;
+          if (!nregaStateAggregates[stateName]) nregaStateAggregates[stateName] = 0;
+          nregaStateAggregates[stateName] += districtValue;
+        });
+      }
+
+      const getDatasetValue = (properties) => {
+        // Always prefer the year-specific key; fall back to base key only if missing
+        let value = getNumeric(properties[yearKey])
+          ?? getNumeric(properties[dataset]);
+
+        if ((!value || value === 0) && dataset === 'nrega_demand') {
+          value = getNumeric(properties[`nrega_persondays_total_${year}`])
+            ?? getNumeric(properties['nrega_persondays_total'])
+            ?? 0;
+        }
+
+        if (dataset.startsWith('nrega_') && !value) {
+          // Last resort: find any year-suffixed entry and use the closest year
+          const suffixEntries = Object.entries(properties)
+            .filter(([k]) => k.startsWith(`${dataset}_`))
+            .map(([k, v]) => {
+              const yearMatch = k.match(/_(\d{4})$/);
+              const num = getNumeric(v);
+              return yearMatch && num !== null ? [parseInt(yearMatch[1], 10), num] : null;
+            })
+            .filter(Boolean);
+
+          if (suffixEntries.length > 0) {
+            // Pick the entry whose year is closest to the selected year
+            const targetYear = parseInt(year, 10);
+            suffixEntries.sort((a, b) => Math.abs(a[0] - targetYear) - Math.abs(b[0] - targetYear));
+            value = suffixEntries[0][1];
+          }
+        }
+
+        return value || 0;
+      };
+
+      // Attach computed values to state features and compute max for display
       let maxStateVal = 0;
       indiaMicesData.features.forEach(f => {
-         const val = f.properties[dataset];
-         if (val && val > maxStateVal) maxStateVal = val;
+        const value = getDatasetValue(f.properties);
+        f.properties._nrega_value = value;
+        if (value > maxStateVal) maxStateVal = value;
       });
+
+      if (map.current.getSource('states')) {
+        map.current.getSource('states').setData(indiaMicesData);
+      }
       if (maxStateVal === 0) maxStateVal = 100;
-      
-      // Find max district value
+
+      // Attach computed values to district features and compute max for display
       let maxDistVal = 0;
       indiaMicesDistrictData.features.forEach(f => {
-         const val = f.properties[dataset];
-         if (val && val > maxDistVal) maxDistVal = val;
+        const value = getDatasetValue(f.properties);
+        f.properties._nrega_value = value;
+        if (value > maxDistVal) maxDistVal = value;
       });
+
+      if (map.current.getSource('districts')) {
+        map.current.getSource('districts').setData(indiaMicesDistrictData);
+      }
       if (maxDistVal === 0) maxDistVal = 100;
-      
+
+      // debug: show dataset state/district max values for visual sanity
+      console.log('MapView dataset', dataset, 'year', year, 'maxStateVal', maxStateVal, 'maxDistVal', maxDistVal);
+
       if (map.current.getLayer('states-fill')) {
-         map.current.removeLayer('states-fill');
+        map.current.removeLayer('states-fill');
       }
       if (map.current.getSource('states')) {
-         map.current.addLayer({
-            id: 'states-fill',
-            type: 'fill',
-            source: 'states',
-            maxzoom: 5.5,
-            paint: {
-              'fill-color': [
-                  'interpolate',
-                  ['exponential', 0.5],
-                  ['coalesce', ['get', dataset], 0],
-                  0, colors[0],
-                  maxStateVal * 0.1, colors[1],
-                  maxStateVal * 0.25, colors[2],
-                  maxStateVal * 0.5, colors[3],
-                  maxStateVal, colors[4]
-              ],
-              'fill-opacity': 0.8,
-              'fill-outline-color': 'rgba(0,0,0,0)'
-            }
-         }, map.current.getLayer('states-line') ? 'states-line' : undefined);
+        map.current.addLayer({
+          id: 'states-fill',
+          type: 'fill',
+          source: 'states',
+          maxzoom: 5.5,
+          paint: {
+            'fill-color': [
+              'interpolate',
+              ['exponential', 0.5],
+              ['coalesce', ['get', '_nrega_value'], ['get', dataset], ['get', yearKey], 0],
+              0, colors[0],
+              maxStateVal * 0.1, colors[1],
+              maxStateVal * 0.25, colors[2],
+              maxStateVal * 0.5, colors[3],
+              maxStateVal, colors[4]
+            ],
+            'fill-opacity': 0.8,
+            'fill-outline-color': 'rgba(0,0,0,0)'
+          }
+        }, map.current.getLayer('states-line') ? 'states-line' : undefined);
       }
-      
+
       if (map.current.getLayer('districts-fill')) {
-         map.current.removeLayer('districts-fill');
+        map.current.removeLayer('districts-fill');
       }
       if (map.current.getSource('districts')) {
-         map.current.addLayer({
-            id: 'districts-fill',
-            type: 'fill',
-            source: 'districts',
-            minzoom: 5.5,
-            paint: {
-              'fill-color': [
-                  'interpolate',
-                  ['exponential', 0.5],
-                  ['coalesce', ['get', dataset], 0],
-                  0, colors[0],
-                  maxDistVal * 0.1, colors[1],
-                  maxDistVal * 0.25, colors[2],
-                  maxDistVal * 0.5, colors[3],
-                  maxDistVal, colors[4]
-              ],
-              'fill-opacity': 0.8,
-              'fill-outline-color': 'rgba(0,0,0,0)'
-            }
-         }, map.current.getLayer('districts-line') ? 'districts-line' : undefined);
+        map.current.addLayer({
+          id: 'districts-fill',
+          type: 'fill',
+          source: 'districts',
+          minzoom: 5.5,
+          paint: {
+            'fill-color': [
+              'interpolate',
+              ['exponential', 0.5],
+              ['coalesce', ['get', '_nrega_value'], ['get', dataset], ['get', yearKey], 0],
+              0, colors[0],
+              maxDistVal * 0.1, colors[1],
+              maxDistVal * 0.25, colors[2],
+              maxDistVal * 0.5, colors[3],
+              maxDistVal, colors[4]
+            ],
+            'fill-opacity': 0.8,
+            'fill-outline-color': 'rgba(0,0,0,0)'
+          }
+        }, map.current.getLayer('districts-line') ? 'districts-line' : undefined);
       }
-      
+
     } else {
        if (map.current.getLayer('states-fill')) {
           map.current.setPaintProperty('states-fill', 'fill-opacity', 0);
@@ -278,7 +361,7 @@ export default function MapView({ dataset, year, onStateSelect, selectedState })
           map.current.setPaintProperty('districts-fill', 'fill-opacity', 0);
        }
     }
-  }, [year, dataset, styleLoadedTrigger])
+  }, [year, dataset, styleLoadedTrigger, indiaMicesDistrictData])
 
   // Handle selected state styling
   useEffect(() => {
@@ -429,16 +512,11 @@ export default function MapView({ dataset, year, onStateSelect, selectedState })
             <div className="mt-1 text-gray-600">
                <p>
                  <span className="font-medium mr-1">
-                   {dataset.replace('mices_', '').replace('nrega_', '').replace(/_/g, ' ')}:
+                   {dataset.replace('mices_', '').replace('nrega_', '').replace(/_/g, ' ')}
+                   {dataset?.startsWith('nrega_') && year ? ` (${year})` : ''}:
                  </span>
-                 {(tooltip.data[dataset] || 0).toLocaleString()}
+                 {(tooltip.data._nrega_value ?? tooltip.data[`${dataset}_${year}`] ?? tooltip.data[dataset] ?? 0).toLocaleString()}
                </p>
-            </div>
-          ) : tooltip.data.name ? (
-            <div className="mt-1 text-gray-600">
-              <p className="font-bold text-gray-800">{tooltip.data.name}</p>
-              <p><span className="font-medium mr-1">Value:</span>{tooltip.data.mnrega}</p>
-              <p><span className="font-medium mr-1">Year:</span>{tooltip.data.year}</p>
             </div>
           ) : null}
         </div>

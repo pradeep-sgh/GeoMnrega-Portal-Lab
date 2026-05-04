@@ -4,11 +4,14 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "predev": "node run_preprocessing.cjs",
     "dev": "vite",
+    "prebuild": "node run_preprocessing.cjs",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "html2canvas": "^1.4.1",
     "lucide-react": "^0.577.0",
     "mapbox-gl": "^2.15.0",
     "playwright": "^1.58.2",

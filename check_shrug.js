@@ -1,0 +1,10 @@
+const d = require('./src/data/shrug_state_data.json');
+const g = require('./src/data/mices/india_mices.json');
+const shrugKeys = Object.keys(d.pca11).sort();
+const geoKeys = g.features.map(f => f.properties.NAME_1).sort();
+console.log('SHRUG pca11 keys:', shrugKeys.join(', '));
+console.log('\nGeoJSON NAME_1:', geoKeys.join(', '));
+console.log('\nOdisha in shrug:', shrugKeys.find(k => k.toLowerCase().includes('odish')));
+console.log('Telangana in shrug:', shrugKeys.find(k => k.toLowerCase().includes('telan')));
+console.log('\nIn GeoJSON but NOT in SHRUG:', geoKeys.filter(n => !shrugKeys.includes(n)));
+console.log('In SHRUG but NOT in GeoJSON:', shrugKeys.filter(n => !geoKeys.includes(n)));

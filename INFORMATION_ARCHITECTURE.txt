@@ -1,0 +1,427 @@
+================================================================================
+         GeoMNREGA PORTAL — COMPLETE INFORMATION ARCHITECTURE
+================================================================================
+Generated: 2026-04-01
+Project:   GeoMNREGA Research Portal (React + Vite + Mapbox GL JS)
+Path:      src/
+================================================================================
+
+
+--------------------------------------------------------------------------------
+1. APPLICATION SHELL
+--------------------------------------------------------------------------------
+
+  index.html  →  main.jsx  →  App.jsx
+
+  App.jsx is the ROOT CONTROLLER.
+  It manages 3 view states and handles overlay routing (no React Router).
+
+  STATE VARIABLES IN App.jsx:
+  ┌─────────────────────┬────────────┬─────────────────────────────────────────┐
+  │ Variable            │ Type       │ Purpose                                 │
+  ├─────────────────────┼────────────┼─────────────────────────────────────────┤
+  │ reportState         │ obj / null │ Clicked state's GeoJSON feature props   │
+  │ reportDataset       │ str / null │ Active dataset when state was clicked   │
+  │ reportYear          │ string     │ Active year (default '2020')            │
+  │ useCaseDataset      │ str / null │ LULC dataset ID if viewer is open       │
+  └─────────────────────┴────────────┴─────────────────────────────────────────┘
+
+  VIEW ROUTING (overlay-based, not page navigation):
+
+    App
+    ├── <Home>           → Always rendered; hidden via opacity when overlay open
+    ├── <StateReport>    → Overlays Home when reportState is set (state clicked)
+    └── <UseCaseReport>  → Overlays Home when useCaseDataset is set (LULC)
+
+
+--------------------------------------------------------------------------------
+2. PAGES
+--------------------------------------------------------------------------------
+
+  ── Home.jsx (src/pages/Home.jsx) ───────────────────────────────────────────
+  The main interactive map page.
+
+  LOCAL STATE:
+    dataset       → currently selected dataset ID (e.g. 'nrega_employment_total')
+    year          → selected financial year (e.g. '2020')
+    selectedState → feature properties of the clicked state on map
+
+  CHILDREN & PROP FLOW:
+    <Sidebar>          dataset, setDataset, year, setYear
+    <MapView>          dataset, year, onStateSelect, selectedState
+    <Legend>           dataset, year
+    <StateDashboard>   stateData, dataset, year, onClose, onExpand
+
+  KEY LOGIC:
+    - LULC datasets (lulc-2005/2009/2015)   → opens UseCaseReport overlay
+    - MICES / NREGA datasets                 → renders choropleth on map
+    - Clicking a state on map                → sets selectedState → shows StateDashboard
+    - "Expand Region" in StateDashboard      → opens StateReport full page
+
+
+  ── StateReport.jsx (src/pages/StateReport.jsx) ─────────────────────────────
+  Full drill-down report for a selected state.
+
+  PROPS:  stateData, dataset, year, onBack
+
+  WHAT IT DOES:
+    - Filters india_mices_districts.json for the selected state's districts
+    - Calculates: total districts, max value, total volume
+    - Renders top-10 districts ranked by dataset value
+    - Full interactive Mapbox map zoomed to that state (district-level choropleth)
+    - Hover tooltip showing district name + value
+
+  ⚠ GAP: Top Districts list uses f.properties[dataset] (base key, not year-specific)
+          Line: StateReport.jsx:239
+
+
+  ── UseCaseReport.jsx (src/pages/UseCaseReport.jsx) ─────────────────────────
+  Static LULC image viewer with pan + zoom interaction.
+
+  PROPS:  datasetId, onBack
+
+  WHAT IT DOES:
+    - Displays a static image from src/image/image.png
+    - Supports mouse-wheel zoom (up to 10x) and drag-to-pan
+    - Export / Download buttons present (UI only — not wired to real data)
+    - Triggered by dataset IDs: lulc-2005, lulc-2009, lulc-2015
+
+  ⚠ GAP: All three LULC years show the SAME static image (image.png)
+
+
+--------------------------------------------------------------------------------
+3. COMPONENTS
+--------------------------------------------------------------------------------
+
+  ACTIVE (used in current flow):
+  ┌─────────────────────┬─────────────────────┬───────────────────────────────┐
+  │ Component           │ Used In             │ Purpose                       │
+  ├─────────────────────┼─────────────────────┼───────────────────────────────┤
+  │ Sidebar.jsx         │ Home                │ Dataset accordion + year pick │
+  │ MapView.jsx         │ Home                │ Full-screen Mapbox choropleth │
+  │ Legend.jsx          │ Home                │ Color scale (bottom-right)    │
+  │ StateDashboard.jsx  │ Home                │ Bottom overlay on state click │
+  │ MiniMap.jsx         │ StateDashboard      │ Small district map per state  │
+  └─────────────────────┴─────────────────────┴───────────────────────────────┘
+
+  DEAD / UNUSED (present in codebase but not rendered anywhere):
+  ┌─────────────────────┬───────────────────────────────────────────────────────┐
+  │ Component           │ Notes                                                 │
+  ├─────────────────────┼───────────────────────────────────────────────────────┤
+  │ ControlPanel.jsx    │ Old dataset/year selector, replaced by Sidebar        │
+  │ StatsPanel.jsx      │ Old hardcoded stats panel                             │
+  │ DatasetCards.jsx    │ Static info cards, never rendered                     │
+  │ Navbar.jsx          │ Navigation bar, never used in any page                │
+  │ Footer.jsx          │ Footer, not rendered in current layout                │
+  └─────────────────────┴───────────────────────────────────────────────────────┘
+
+
+--------------------------------------------------------------------------------
+4. DATA SOURCES
+--------------------------------------------------------------------------------
+
+  ── src/data/mices/ (GeoJSON files with real boundaries + embedded data) ────
+
+  india_mices.json
+    • 36 states / Union Territories
+    • Real polygon boundaries (MultiPolygon)
+    • Embedded properties per feature:
+        mices_dugwell, mices_shallow_tubewell, mices_medium_tubewell,
+        mices_deep_tubewell, mices_total_gw_scheme,
+        mices_surface_flow_scheme, mices_surface_lift_scheme,
+        mices_total_sw_scheme, mices_total_water_scheme
+        nrega_demand_2014 … nrega_demand_2023
+        nrega_employment_total_2014 … nrega_employment_total_2023
+        nrega_women_employment_2014 … nrega_women_employment_2023
+        nrega_persondays_total_2014 … nrega_persondays_total_2023
+        nrega_demand (base = latest year)
+        nrega_employment_total (base = latest year)
+        nrega_women_employment (base = latest year)
+        nrega_persondays_total (base = latest year)
+
+  india_mices_districts.json
+    • ~640 districts
+    • Same embedded properties as state file (NREGA + MICES per district)
+
+  india_states.json
+    • State boundaries only (NAME fields, no data)
+    • NOT used in map rendering currently
+
+  india_districts.json
+    • District boundaries only (NAME fields, no data)
+    • NOT used in map rendering currently
+
+  mices_state_data.json
+    • Raw water scheme counts per state (JSON object, keyed by state name)
+    • NOT embedded into india_mices.json fully yet
+    • Fields: dugwell, shallow_tubewell, medium_tubewell, deep_tubewell,
+              total_gw_scheme, surface_flow_scheme, surface_lift_scheme,
+              total_sw_scheme, total_water_scheme
+
+  ── src/data/nrega_reports/ (CSV files — raw NREGA data) ───────────────────
+
+  Employment - SC-ST/
+    employment_scst_state.csv
+      Granularity: State × Financial Year (2014-2015 to present)
+      Fields: SC/ST/Others job cards issued, employment provided,
+              women employment, persondays (SC/ST/Others/Total),
+              families completing 100 days
+
+    employment_scst_district.csv
+      Same as above but at District level
+      → Used by process_nrega.py to embed into india_mices_districts.json
+
+    employment_scst_block.csv
+      Block-level data
+      ⚠ NEVER USED in any component
+
+    employment_scst_panchayat.csv  [not present, only block level]
+
+  Work Demand Pattern/
+    work_demand_pattern_hh_state.csv
+      Granularity: State × Year × Month
+      Fields: state_name, year, month, demand
+
+    work_demand_pattern_hh_district.csv
+      Same but District level
+      → Used by process_nrega.py to embed demand into GeoJSON
+
+    work_demand_pattern_hh_block.csv
+      Block-level
+      ⚠ NEVER USED in any component
+
+    work_demand_pattern_hh_panchayat.csv
+      Panchayat-level
+      ⚠ NEVER USED in any component
+
+
+--------------------------------------------------------------------------------
+5. DATASET IDs — SIDEBAR → MAP BEHAVIOR
+--------------------------------------------------------------------------------
+
+  Water Infrastructure (MICES) — Purple color scale
+  ┌───────────────────────────────┬───────────────────────────────────────────┐
+  │ ID                            │ Display Name                              │
+  ├───────────────────────────────┼───────────────────────────────────────────┤
+  │ mices_dugwell                 │ Dugwell Schemes                           │
+  │ mices_shallow_tubewell        │ Shallow Tubewell Schemes                  │
+  │ mices_medium_tubewell         │ Medium Tubewell Schemes                   │
+  │ mices_deep_tubewell           │ Deep Tubewell Schemes                     │
+  │ mices_surface_flow_scheme     │ Surface Flow Schemes                      │
+  │ mices_surface_lift_scheme     │ Surface Lift Schemes                      │
+  │ mices_total_water_scheme      │ Total Water Schemes                       │
+  └───────────────────────────────┴───────────────────────────────────────────┘
+  Map Render: State choropleth (zoom < 5.5) + District choropleth (zoom > 5.5)
+  Year Effect: NOT year-specific (static totals)
+
+  NREGA Socio-Economic Reports — Green / Orange color scale
+  ┌───────────────────────────────┬───────────────────────────────────────────┐
+  │ ID                            │ Display Name                              │
+  ├───────────────────────────────┼───────────────────────────────────────────┤
+  │ nrega_demand                  │ Total Work Demand (Orange scale)          │
+  │ nrega_employment_total        │ Total Households Employed (Green)         │
+  │ nrega_women_employment        │ Women Employed (Green)                    │
+  │ nrega_persondays_total        │ Total Person-Days Generated (Green)       │
+  └───────────────────────────────┴───────────────────────────────────────────┘
+  Map Render: State choropleth + District choropleth (year-specific keys)
+  Year Effect: YES — reads nrega_{dataset}_{year} key (e.g. nrega_employment_total_2020)
+  Available Years: 2014 – 2023
+
+  Land Use / NICES — Raster tiles (requires local server)
+  ┌───────────────────────────────┬───────────────────────────────────────────┐
+  │ ID                            │ Display Name                              │
+  ├───────────────────────────────┼───────────────────────────────────────────┤
+  │ nices-cropland                │ Annual Cropland                           │
+  │ nices-forest-class            │ Forest Class & Cover                      │
+  └───────────────────────────────┴───────────────────────────────────────────┘
+  Map Render: Raster tile layer from http://localhost:8000
+  ⚠ Requires local tile server to be running separately
+
+  LULC Data — Opens UseCaseReport image viewer
+  ┌───────────────────────────────┬───────────────────────────────────────────┐
+  │ ID                            │ Display Name                              │
+  ├───────────────────────────────┼───────────────────────────────────────────┤
+  │ lulc-2005                     │ LULC 2005-06 Analysis                     │
+  │ lulc-2009                     │ LULC 2009-10 Analysis                     │
+  │ lulc-2015                     │ LULC 2015-16 Analysis                     │
+  └───────────────────────────────┴───────────────────────────────────────────┘
+  Map Render: NONE — opens UseCaseReport overlay (static image viewer)
+  ⚠ All three show same image.png currently
+
+  Placeholder categories (no render, UI only):
+    - MGNREGA Farm Ponds        → bhuvan-ponds
+    - Climate & Environment     → era5-evaporation, era5-precipitation,
+                                   era5-soil-temp-1, era5-soil-temp-4
+    - Rural Infrastructure      → pmgsy-facilities, pmgsy-habitation,
+                                   pmgsy-roads, pmgsy-tourist
+    - Admin Boundaries          → gramchitra-gp, ind-subdistrict, ind-district
+    - NICES (remaining)         → nices-soil-carbon, nices-soil-moisture
+
+
+--------------------------------------------------------------------------------
+6. STATE & DATA FLOW
+--------------------------------------------------------------------------------
+
+  User selects Year (Sidebar year dropdown)
+      │
+      └─→ year state (Home.jsx)
+             ├─→ MapView   uses nrega_{dataset}_{year} key in GeoJSON properties
+             ├─→ Legend    computes max from nrega_{dataset}_{year} for scale
+             └─→ StateDashboard reads nrega_{dataset}_{year} from stateData
+
+  User selects Dataset (Sidebar accordion item click)
+      │
+      └─→ dataset state (Home.jsx)
+             ├─→ MapView   switches color scale (green/orange/purple) + data key
+             ├─→ Legend    switches gradient colors + recomputes labels
+             └─→ StateDashboard switches displayed metric title and value
+
+  User clicks State on Map
+      │
+      └─→ selectedState = { NAME_0, NAME_1, mices_*, nrega_*_YEAR, mapboxId }
+             └─→ StateDashboard renders (bottom overlay)
+                    ├─→ MiniMap: district-level choropleth of clicked state
+                    ├─→ KPI cards with dataset values
+                    ├─→ Bar chart (district distribution)
+                    └─→ "Expand Region" button
+                            └─→ App.handleOpenReport() called
+                                    └─→ StateReport page renders (full overlay)
+
+  User clicks LULC dataset in Sidebar
+      │
+      └─→ Home.setDataset(id) detects lulc- prefix
+             └─→ App.onOpenUseCase(id) called
+                     └─→ UseCaseReport renders (full overlay, z-50)
+
+  User zooms map past 5.5
+      │
+      └─→ MapView auto-switches from State layer to District layer
+             (maxzoom: 5.5 on states-fill/states-line)
+             (minzoom: 5.5 on districts-fill/districts-line)
+
+
+--------------------------------------------------------------------------------
+7. MAP RENDERING PIPELINE (MapView.jsx)
+--------------------------------------------------------------------------------
+
+  Mapbox GL JS initialization (once on mount):
+    center: [78, 21] (India centroid)
+    zoom: 4.5
+    style: mapbox://styles/mapbox/streets-v12 (default)
+
+  Sources added on first style load:
+    'states'    → india_mices.json    (generateId: true)
+    'districts' → india_mices_districts.json (generateId: true)
+
+  Layers:
+    states-fill     maxzoom: 5.5  fill choropleth (interpolate exponential)
+    states-line     maxzoom: 5.5  black border, thickens on hover/select
+    districts-fill  minzoom: 5.5  fill choropleth (interpolate exponential)
+    districts-line  minzoom: 5.5  black border, thickens on hover
+
+  Color computation:
+    1. Iterates all features, reads _nrega_value (pre-computed per feature)
+    2. maxStateVal / maxDistVal used as upper bound of color scale
+    3. 5-step exponential interpolation: 0%, 10%, 25%, 50%, 100% of max
+
+  Style switching (satellite / street):
+    mapStyle state → triggers map.setStyle() → styleLoadedTrigger increments
+    → re-runs data effect to re-add sources and layers after style reload
+
+  Map style toggle buttons (top-right):
+    🛰️  Satellite view  → mapbox://styles/mapbox/satellite-streets-v12
+    🗺️  Street view     → mapbox://styles/mapbox/streets-v12
+
+  Location search (top-center):
+    Mapbox Geocoding API → fly-to on result select
+
+
+--------------------------------------------------------------------------------
+8. KNOWN GAPS & ISSUES
+--------------------------------------------------------------------------------
+
+  #  Issue                                              Location
+  ── ─────────────────────────────────────────────────  ────────────────────────
+  1  StateReport Top Districts uses base key not YEAR   StateReport.jsx : 239
+  2  MiniMap uses base key not year-specific            MiniMap.jsx : 47, 66
+  3  era5/pmgsy/gramchitra/bhuvan datasets not wired    Sidebar only (no render)
+  4  Block & Panchayat CSVs loaded but never shown      nrega_reports/ folder
+  5  NICES raster needs localhost:8000 tile server      MapView.jsx : 192
+  6  UseCaseReport shows same image for all LULC years  UseCaseReport.jsx
+  7  Export CSV / Download PDF buttons not functional   StateReport.jsx
+  8  ControlPanel, StatsPanel, DatasetCards are dead    src/components/ (unused)
+  9  Navbar and Footer never rendered                   src/components/ (unused)
+  10 mices_state_data.json not fully integrated         src/data/mices/
+
+
+--------------------------------------------------------------------------------
+9. FILE TREE
+--------------------------------------------------------------------------------
+
+  src/
+  ├── App.jsx                  Root controller (overlay routing)
+  ├── main.jsx                 React DOM entry point
+  ├── index.css                Tailwind base styles + custom scrollbar
+  │
+  ├── pages/
+  │   ├── Home.jsx             Main map page
+  │   ├── StateReport.jsx      State drill-down report
+  │   └── UseCaseReport.jsx    LULC image viewer
+  │
+  ├── components/
+  │   ├── Sidebar.jsx          ✅ Dataset accordion + year selector
+  │   ├── MapView.jsx          ✅ Full-screen Mapbox choropleth
+  │   ├── Legend.jsx           ✅ Color scale legend
+  │   ├── StateDashboard.jsx   ✅ Bottom overlay on state click
+  │   ├── MiniMap.jsx          ✅ Mini district map inside StateDashboard
+  │   ├── Navbar.jsx           ❌ Unused
+  │   ├── Footer.jsx           ❌ Unused
+  │   ├── ControlPanel.jsx     ❌ Dead (replaced by Sidebar)
+  │   ├── StatsPanel.jsx       ❌ Dead (hardcoded mock values)
+  │   └── DatasetCards.jsx     ❌ Dead (never rendered)
+  │
+  ├── data/
+  │   ├── mices/
+  │   │   ├── india_mices.json              ✅ State GeoJSON + all data
+  │   │   ├── india_mices_districts.json    ✅ District GeoJSON + all data
+  │   │   ├── india_states.json             ❌ Not used in rendering
+  │   │   ├── india_districts.json          ❌ Not used in rendering
+  │   │   └── mices_state_data.json         ⚠ Not fully integrated
+  │   │
+  │   ├── nrega_reports/
+  │   │   ├── Employment - SC-ST/
+  │   │   │   ├── employment_scst_state.csv     ✅ Embedded via Python script
+  │   │   │   ├── employment_scst_district.csv  ✅ Embedded via Python script
+  │   │   │   └── employment_scst_block.csv     ❌ Never used
+  │   │   └── Work Demand Pattern/
+  │   │       ├── work_demand_pattern_hh_state.csv     ✅ Embedded
+  │   │       ├── work_demand_pattern_hh_district.csv  ✅ Embedded
+  │   │       ├── work_demand_pattern_hh_block.csv     ❌ Never used
+  │   │       └── work_demand_pattern_hh_panchayat.csv ❌ Never used
+  │   │
+  │   └── mockData.js          ❌ No longer imported anywhere (can be deleted)
+  │
+  └── image/
+      └── image.png            Used in UseCaseReport (same for all LULC years)
+
+
+--------------------------------------------------------------------------------
+10. TECH STACK
+--------------------------------------------------------------------------------
+
+  React 18           UI framework
+  Vite 5             Build tool + dev server (http://localhost:5173)
+  Mapbox GL JS 2     Interactive map rendering (requires VITE_MAPBOX_TOKEN)
+  Tailwind CSS 3     Utility-first styling
+  PostCSS            CSS processing
+  React Router DOM 7 Installed but NOT used (routing is overlay-based in App.jsx)
+  Lucide React       Icon library
+  Playwright         Installed but no tests written
+
+  Environment variable required:
+    VITE_MAPBOX_TOKEN   → Mapbox public access token (in .env file)
+
+
+================================================================================
+END OF INFORMATION ARCHITECTURE
+================================================================================
